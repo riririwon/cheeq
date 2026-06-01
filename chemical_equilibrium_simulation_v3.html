@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>화학 평형 시뮬레이션</title>
+<style>
+body{font-family:"Malgun Gothic",Arial,sans-serif;margin:0;background:#f4f6fb;color:#1f2937}
+.wrap{max-width:1120px;margin:24px auto;padding:0 16px}
+.header,.card{background:white;border-radius:22px;padding:20px;box-shadow:0 4px 16px rgba(0,0,0,.08)}
+.header{margin-bottom:18px}
+h1{margin:0 0 8px 0;font-size:26px}
+p{margin:6px 0;line-height:1.55}
+.main{display:grid;grid-template-columns:1.45fr 1fr;gap:18px}
+#box{height:520px;border:2px solid #cbd5e1;border-radius:20px;position:relative;overflow:hidden;background:radial-gradient(circle at center,#fff 0%,#eef5ff 70%,#e8efff 100%)}
+.particle{position:absolute;width:18px;height:18px;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 2px 5px rgba(0,0,0,.22)}
+.A{background:#2563eb}.B{background:#f43f5e}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+button{border:0;border-radius:12px;padding:10px 13px;background:#334155;color:white;cursor:pointer;font-weight:700}
+button:hover{background:#1e293b}.secondary{background:#64748b}.red{background:#e11d48}.blue{background:#2563eb}
+input[type=range]{width:100%}
+.stat{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.box{background:#f1f5f9;border-radius:16px;padding:14px}
+.label{color:#64748b;font-size:13px;font-weight:700}.value{font-size:23px;font-weight:900;margin-top:3px}
+.judge{margin-top:12px;padding:16px;border-radius:18px;background:#fef3c7;line-height:1.55}.judge.eq{background:#dcfce7}
+.formula{background:#0f172a;color:white;border-radius:18px;padding:16px;line-height:1.8;margin-top:12px}
+.legend{display:flex;gap:18px;margin:12px 0;font-weight:700}.dot{display:inline-block;width:14px;height:14px;border-radius:50%;vertical-align:middle;margin-right:6px}
+.arrow{font-size:30px;font-weight:900;text-align:center;padding:12px;border-radius:18px;background:#eef2ff;margin-top:12px}
+.small{color:#64748b;font-size:14px}.mode{border:2px solid #e2e8f0;border-radius:18px;padding:12px;margin-top:12px}
+@media(max-width:900px){.main{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="header">
+<h1>화학 반응의 진행 방향 예측 시뮬레이션</h1>
+<p><b>A ⇌ B</b> 단순 반응을 입자 모형으로 나타냅니다.</p>
+<p>평형상수 K를 바꾸면 입자 수가 즉시 새 평형 조성으로 바뀌고, 반응물이나 생성물을 첨가하면 Q와 K를 비교하여 정반응 또는 역반응으로 천천히 이동합니다.</p>
+</div>
+
+<div class="main">
+<div class="card">
+<h2>입자 모형 공간</h2>
+<div class="small">반응물 A와 생성물 B가 같은 공간 안에서 섞여 움직입니다.</div>
+<div class="legend">
+<span><span class="dot" style="background:#2563eb"></span>반응물 A</span>
+<span><span class="dot" style="background:#f43f5e"></span>생성물 B</span>
+</div>
+<div id="box"></div>
+</div>
+
+<div class="card">
+<h2>조작</h2>
+
+<div class="mode">
+<b>평형상수 K 조절</b>
+<p class="small">K를 바꾸면 즉시 새 평형 조성으로 입자 수가 재배치됩니다.</p>
+<input id="kSlider" type="range" min="0.2" max="5" step="0.1" value="1" oninput="changeK(this.value)">
+<div class="small">K = <b id="kLabel">1.0</b></div>
+</div>
+
+<div class="mode">
+<b>평형 이동 실험</b>
+<p class="small">반응물 또는 생성물을 첨가하면 Q와 K를 비교하여 새 평형으로 이동합니다.</p>
+<div class="controls">
+<button class="blue" onclick="addParticles('A',10)">반응물 A +10</button>
+<button class="red" onclick="addParticles('B',10)">생성물 B +10</button>
+<button class="secondary" onclick="running=!running">정지/재생</button>
+<button onclick="resetSim()">초기화</button>
+</div>
+</div>
+
+<div class="mode">
+<b>입자 움직임 속도</b>
+<input id="speedSlider" type="range" min="0.08" max="0.8" step="0.04" value="0.22" oninput="changeSpeed(this.value)">
+<div class="small">현재 속도: <b id="speedLabel">느림</b></div>
+</div>
+
+<div class="stat">
+<div class="box"><div class="label">반응물 A</div><div class="value" id="aCount">0</div></div>
+<div class="box"><div class="label">생성물 B</div><div class="value" id="bCount">0</div></div>
+<div class="box"><div class="label">반응지수 Q</div><div class="value" id="qValue">0</div></div>
+<div class="box"><div class="label">평형상수 K</div><div class="value" id="kValue">0</div></div>
+</div>
+
+<div id="arrow" class="arrow">A ⇌ B</div>
+<div id="judge" class="judge"></div>
+
+<div class="formula">
+<b>판단 원리</b><br>
+Q = [B] / [A]<br>
+Q &lt; K : 정반응 진행, A → B<br>
+Q &gt; K : 역반응 진행, B → A<br>
+Q ≈ K : 평형 상태
+</div>
+</div>
+</div>
+</div>
+
+<script>
+let K=1.0,totalParticles=80,particles=[],running=true,moveSpeed=0.22,boxW=0,boxH=0;
+
+function boxSize(){
+ const box=document.getElementById("box");
+ boxW=box.clientWidth; boxH=box.clientHeight;
+}
+function randomParticle(type){
+ return {type:type,x:30+Math.random()*(boxW-60),y:30+Math.random()*(boxH-60),
+ vx:(Math.random()*2-1)*moveSpeed,vy:(Math.random()*2-1)*moveSpeed};
+}
+function counts(){
+ let A=particles.filter(p=>p.type==="A").length;
+ let B=particles.filter(p=>p.type==="B").length;
+ return {A:A,B:B};
+}
+function makeEquilibriumByK(){
+ totalParticles=particles.length||totalParticles;
+ let targetB=Math.round(totalParticles*K/(1+K));
+ let targetA=totalParticles-targetB;
+ particles=[];
+ for(let i=0;i<targetA;i++)particles.push(randomParticle("A"));
+ for(let i=0;i<targetB;i++)particles.push(randomParticle("B"));
+ renderParticles(); updateInfo();
+}
+function changeK(value){
+ K=Number(value);
+ document.getElementById("kLabel").innerText=K.toFixed(1);
+ makeEquilibriumByK();
+}
+function changeSpeed(value){
+ moveSpeed=Number(value);
+ let text="느림";
+ if(moveSpeed>0.35)text="보통";
+ if(moveSpeed>0.6)text="빠름";
+ document.getElementById("speedLabel").innerText=text;
+ particles.forEach(p=>{
+   let a=Math.random()*Math.PI*2;
+   p.vx=Math.cos(a)*moveSpeed; p.vy=Math.sin(a)*moveSpeed;
+ });
+}
+function addParticles(type,n){
+ boxSize();
+ for(let i=0;i<n;i++)particles.push(randomParticle(type));
+ totalParticles=particles.length;
+ renderParticles(); updateInfo();
+}
+function resetSim(){
+ K=1.0; totalParticles=80;
+ document.getElementById("kSlider").value=1;
+ document.getElementById("kLabel").innerText="1.0";
+ init();
+}
+function reactionStep(){
+ let c=counts(),A=c.A,B=c.B;
+ let Q=B/Math.max(A,0.1);
+ if(Math.abs(Q-K)<0.03)return;
+ if(Q<K&&A>0){
+   let list=particles.filter(p=>p.type==="A");
+   list[Math.floor(Math.random()*list.length)].type="B";
+ }else if(Q>K&&B>0){
+   let list=particles.filter(p=>p.type==="B");
+   list[Math.floor(Math.random()*list.length)].type="A";
+ }
+}
+function renderParticles(){
+ const box=document.getElementById("box");
+ box.innerHTML="";
+ particles.forEach((p,i)=>{
+   const d=document.createElement("div");
+   d.className="particle "+p.type;
+   d.id="p"+i;
+   box.appendChild(d);
+ });
+ updateParticlePositions();
+}
+function updateParticlePositions(){
+ particles.forEach((p,i)=>{
+   const d=document.getElementById("p"+i);
+   if(!d)return;
+   d.className="particle "+p.type;
+   d.style.left=p.x+"px";
+   d.style.top=p.y+"px";
+ });
+}
+function move(){
+ boxSize();
+ particles.forEach(p=>{
+   p.x+=p.vx; p.y+=p.vy;
+   if(p.x<12||p.x>boxW-12)p.vx*=-1;
+   if(p.y<12||p.y>boxH-12)p.vy*=-1;
+   p.x=Math.max(12,Math.min(boxW-12,p.x));
+   p.y=Math.max(12,Math.min(boxH-12,p.y));
+ });
+ updateParticlePositions();
+ requestAnimationFrame(move);
+}
+function updateInfo(){
+ let c=counts(),A=c.A,B=c.B;
+ let Q=B/Math.max(A,0.1);
+ document.getElementById("aCount").innerText=A+"개";
+ document.getElementById("bCount").innerText=B+"개";
+ document.getElementById("qValue").innerText=Q.toFixed(2);
+ document.getElementById("kValue").innerText=K.toFixed(2);
+ let judge=document.getElementById("judge");
+ let arrow=document.getElementById("arrow");
+ if(Math.abs(Q-K)<0.03){
+   judge.className="judge eq";
+   judge.innerHTML="<b>평형 상태</b><br>Q ≈ K 이므로 입자 수의 큰 변화가 거의 없습니다.";
+   arrow.innerText="A ⇌ B";
+ }else if(Q<K){
+   judge.className="judge";
+   judge.innerHTML="<b>정반응 진행</b><br>Q < K 이므로 생성물 B가 더 만들어지는 방향으로 이동합니다.";
+   arrow.innerText="A → B";
+ }else{
+   judge.className="judge";
+   judge.innerHTML="<b>역반응 진행</b><br>Q > K 이므로 반응물 A가 더 만들어지는 방향으로 이동합니다.";
+   arrow.innerText="A ← B";
+ }
+}
+function init(){
+ boxSize();
+ particles=[];
+ let targetB=Math.round(totalParticles*K/(1+K));
+ let targetA=totalParticles-targetB;
+ for(let i=0;i<targetA;i++)particles.push(randomParticle("A"));
+ for(let i=0;i<targetB;i++)particles.push(randomParticle("B"));
+ renderParticles(); updateInfo();
+}
+setInterval(()=>{if(running){reactionStep();updateInfo();}},1100);
+window.addEventListener("resize",boxSize);
+init(); changeSpeed(moveSpeed); move();
+</script>
+</body>
+</html>
