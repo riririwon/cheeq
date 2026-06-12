@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>용액 희석 시뮬레이션</title>
+<style>
+  body {
+    font-family: "Malgun Gothic", Arial, sans-serif;
+    margin: 0;
+    background: #f5f7fb;
+    color: #222;
+  }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 24px auto;
+    padding: 20px;
+  }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: 26px;
+  }
+
+  .subtitle {
+    margin-bottom: 18px;
+    font-size: 16px;
+    color: #555;
+  }
+
+  .sim-area {
+    display: flex;
+    gap: 28px;
+    align-items: flex-start;
+  }
+
+  .panel {
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.12);
+    padding: 18px;
+  }
+
+  canvas {
+    display: block;
+    background: #ffffff;
+    border-radius: 12px;
+  }
+
+  .left-panel {
+    width: 560px;
+  }
+
+  .right-panel {
+    width: 460px;
+  }
+
+  .controls {
+    margin-top: 14px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  button {
+    border: none;
+    border-radius: 10px;
+    padding: 11px 16px;
+    font-size: 15px;
+    cursor: pointer;
+    background: #2f7df6;
+    color: white;
+    font-weight: 700;
+  }
+
+  button.secondary {
+    background: #666;
+  }
+
+  button:disabled {
+    background: #aaa;
+    cursor: default;
+  }
+
+  .info {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: #eef4ff;
+    font-size: 15px;
+    line-height: 1.65;
+  }
+
+  .formula {
+    margin-top: 14px;
+    padding: 14px;
+    border-radius: 12px;
+    background: #fff7e6;
+    font-size: 16px;
+    line-height: 1.75;
+  }
+
+  .highlight {
+    font-weight: 800;
+    color: #124cad;
+  }
+
+  .red {
+    font-weight: 800;
+    color: #c62828;
+  }
+
+  .small {
+    font-size: 13px;
+    color: #666;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>용액 희석 시뮬레이션</h1>
+  <div class="subtitle">
+    물을 추가하면 용질의 총 개수는 그대로이지만, 용액의 부피가 커지면서 같은 크기의 관찰 영역에 들어오는 평균 입자 수가 줄어듭니다.
+  </div>
+
+  <div class="sim-area">
+    <div class="panel left-panel">
+      <canvas id="beakerCanvas" width="520" height="520"></canvas>
+      <div class="controls">
+        <button id="addWaterBtn">물 추가하기</button>
+        <button id="resetBtn" class="secondary">처음으로</button>
+      </div>
+      <div class="info">
+        <div>전체 용질 입자 수: <span id="totalParticles" class="highlight"></span>개 <b>(일정)</b></div>
+        <div>물의 부피: <span id="volumeText" class="highlight"></span> mL</div>
+        <div>상대 농도: <span id="relativeConc" class="highlight"></span></div>
+        <div class="small">비커 속 작은 사각형은 항상 물속의 같은 크기 관찰 영역입니다.</div>
+      </div>
+    </div>
+
+    <div class="panel right-panel">
+      <canvas id="zoomCanvas" width="420" height="420"></canvas>
+      <div class="info">
+        <div>확대 관찰 영역 속 실시간 입자 수: <span id="observedCount" class="red"></span>개</div>
+        <div>최근 10초 평균 입자 수: <span id="avgObservedCount" class="highlight"></span>개</div>
+        <div class="small">실시간 입자 수는 계속 흔들리지만, 평균값은 농도 변화를 더 잘 보여줍니다.</div>
+      </div>
+      <div class="formula">
+        <div>용질 입자 수: <b>일정</b></div>
+        <div>물의 부피: <b>증가</b></div>
+        <div>농도 = 용질의 양 ÷ 용액의 부피</div>
+        <div class="highlight">따라서 물을 추가하면 농도는 감소합니다.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const beakerCanvas = document.getElementById("beakerCanvas");
+const bctx = beakerCanvas.getContext("2d");
+const zoomCanvas = document.getElementById("zoomCanvas");
+const zctx = zoomCanvas.getContext("2d");
+
+const addWaterBtn = document.getElementById("addWaterBtn");
+const resetBtn = document.getElementById("resetBtn");
+
+const totalParticlesEl = document.getElementById("totalParticles");
+const volumeTextEl = document.getElementById("volumeText");
+const relativeConcEl = document.getElementById("relativeConc");
+const observedCountEl = document.getElementById("observedCount");
+const avgObservedCountEl = document.getElementById("avgObservedCount");
+
+const beaker = {
+  x: 120,
+  y: 70,
+  w: 280,
+  h: 390
+};
+
+const observation = {
+  w: 82,
+  h: 82
+};
+
+const particleCount = 90;
+const minWaterHeight = 210;
+const maxWaterHeight = 350;
+const waterStep = 35;
+
+const startVolume = 100;
+const volumeStep = 50;
+
+let waterHeight = minWaterHeight;
+let particles = [];
+let observedSamples = [];
+
+function currentStep() {
+  return Math.round((waterHeight - minWaterHeight) / waterStep);
+}
+
+function currentVolume() {
+  return startVolume + currentStep() * volumeStep;
+}
+
+function relativeConcentration() {
+  return startVolume / currentVolume();
+}
+
+function waterTop() {
+  return beaker.y + beaker.h - waterHeight;
+}
+
+function observationRect() {
+  const top = waterTop();
+  const ox = beaker.x + beaker.w * 0.5 - observation.w / 2;
+  const oy = top + waterHeight * 0.42 - observation.h / 2;
+  return {
+    x: ox,
+    y: Math.max(top + 12, Math.min(oy, beaker.y + beaker.h - observation.h - 12)),
+    w: observation.w,
+    h: observation.h
+  };
+}
+
+function randomParticleInWater() {
+  const r = 4.2;
+  const speed = 0.7 + Math.random() * 0.8;
+  const angle = Math.random() * Math.PI * 2;
+  return {
+    x: beaker.x + r + Math.random() * (beaker.w - 2*r),
+    y: waterTop() + r + Math.random() * (waterHeight - 2*r),
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
+    r
+  };
+}
+
+function initParticles() {
+  particles = [];
+  for (let i = 0; i < particleCount; i++) {
+    particles.push(randomParticleInWater());
+  }
+}
+
+function reset() {
+  waterHeight = minWaterHeight;
+  observedSamples = [];
+  initParticles();
+  addWaterBtn.disabled = false;
+  updateLabels();
+}
+
+function addWater() {
+  if (waterHeight >= maxWaterHeight) return;
+
+  const oldTop = waterTop();
+  const oldHeight = waterHeight;
+  waterHeight = Math.min(maxWaterHeight, waterHeight + waterStep);
+  const newTop = waterTop();
+
+  // 용질 입자 수는 그대로 두고, 물이 많아진 영역 전체로 퍼지도록 위치를 확장한다.
+  for (const p of particles) {
+    const relative = (p.y - oldTop) / oldHeight;
+    p.y = newTop + relative * waterHeight;
+    p.y += (Math.random() - 0.5) * 34;
+    p.y = Math.max(newTop + p.r, Math.min(beaker.y + beaker.h - p.r, p.y));
+
+    p.x += (Math.random() - 0.5) * 30;
+    p.x = Math.max(beaker.x + p.r, Math.min(beaker.x + beaker.w - p.r, p.x));
+  }
+
+  // 부피가 바뀌면 평균도 새 조건에서 다시 쌓는다.
+  observedSamples = [];
+
+  if (waterHeight >= maxWaterHeight) addWaterBtn.disabled = true;
+  updateLabels();
+}
+
+function updateParticles() {
+  const top = waterTop();
+  const bottom = beaker.y + beaker.h;
+  const left = beaker.x;
+  const right = beaker.x + beaker.w;
+
+  for (const p of particles) {
+    p.x += p.vx;
+    p.y += p.vy;
+
+    if (p.x - p.r < left) {
+      p.x = left + p.r;
+      p.vx *= -1;
+    }
+    if (p.x + p.r > right) {
+      p.x = right - p.r;
+      p.vx *= -1;
+    }
+    if (p.y - p.r < top) {
+      p.y = top + p.r;
+      p.vy *= -1;
+    }
+    if (p.y + p.r > bottom) {
+      p.y = bottom - p.r;
+      p.vy *= -1;
+    }
+  }
+}
+
+function countObserved() {
+  const o = observationRect();
+  let count = 0;
+  for (const p of particles) {
+    if (p.x >= o.x && p.x <= o.x + o.w && p.y >= o.y && p.y <= o.y + o.h) {
+      count++;
+    }
+  }
+  return count;
+}
+
+function averageObserved() {
+  if (observedSamples.length === 0) return 0;
+  const sum = observedSamples.reduce((a, b) => a + b, 0);
+  return sum / observedSamples.length;
+}
+
+function drawBeaker() {
+  bctx.clearRect(0, 0, beakerCanvas.width, beakerCanvas.height);
+
+  bctx.fillStyle = "#222";
+  bctx.font = "bold 18px Malgun Gothic, Arial";
+  bctx.fillText("비커 속 용액", 205, 34);
+
+  bctx.lineWidth = 4;
+  bctx.strokeStyle = "#333";
+  bctx.beginPath();
+  bctx.moveTo(beaker.x, beaker.y);
+  bctx.lineTo(beaker.x, beaker.y + beaker.h);
+  bctx.quadraticCurveTo(beaker.x, beaker.y + beaker.h + 18, beaker.x + 22, beaker.y + beaker.h + 18);
+  bctx.lineTo(beaker.x + beaker.w - 22, beaker.y + beaker.h + 18);
+  bctx.quadraticCurveTo(beaker.x + beaker.w, beaker.y + beaker.h + 18, beaker.x + beaker.w, beaker.y + beaker.h);
+  bctx.lineTo(beaker.x + beaker.w, beaker.y);
+  bctx.stroke();
+
+  const top = waterTop();
+  const grad = bctx.createLinearGradient(0, top, 0, beaker.y + beaker.h);
+  grad.addColorStop(0, "rgba(91, 180, 255, 0.55)");
+  grad.addColorStop(1, "rgba(40, 120, 230, 0.55)");
+  bctx.fillStyle = grad;
+  bctx.fillRect(beaker.x + 2, top, beaker.w - 4, waterHeight);
+
+  bctx.strokeStyle = "rgba(20, 90, 200, 0.8)";
+  bctx.lineWidth = 2;
+  bctx.beginPath();
+  bctx.moveTo(beaker.x + 4, top);
+  bctx.lineTo(beaker.x + beaker.w - 4, top);
+  bctx.stroke();
+
+  for (const p of particles) {
+    bctx.beginPath();
+    bctx.fillStyle = "#d52b2b";
+    bctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    bctx.fill();
+  }
+
+  const o = observationRect();
+  bctx.save();
+  bctx.setLineDash([8, 5]);
+  bctx.lineWidth = 3;
+  bctx.strokeStyle = "#ff9f00";
+  bctx.strokeRect(o.x, o.y, o.w, o.h);
+  bctx.restore();
+
+  bctx.fillStyle = "#ff9f00";
+  bctx.font = "bold 15px Malgun Gothic, Arial";
+  bctx.fillText("관찰 영역", o.x - 2, o.y - 8);
+
+  bctx.strokeStyle = "rgba(255,159,0,0.55)";
+  bctx.lineWidth = 2;
+  bctx.beginPath();
+  bctx.moveTo(o.x + o.w, o.y);
+  bctx.lineTo(500, 135);
+  bctx.moveTo(o.x + o.w, o.y + o.h);
+  bctx.lineTo(500, 375);
+  bctx.stroke();
+
+  bctx.fillStyle = "#333";
+  bctx.font = "bold 15px Malgun Gothic, Arial";
+  bctx.fillText("물의 부피: " + currentVolume() + " mL", 28, 496);
+}
+
+function drawZoom() {
+  zctx.clearRect(0, 0, zoomCanvas.width, zoomCanvas.height);
+
+  zctx.fillStyle = "#222";
+  zctx.font = "bold 18px Malgun Gothic, Arial";
+  zctx.fillText("관찰 영역 확대", 145, 32);
+
+  const zx = 55, zy = 58, zw = 310, zh = 310;
+  const o = observationRect();
+  const scaleX = zw / o.w;
+  const scaleY = zh / o.h;
+
+  zctx.fillStyle = "rgba(91, 180, 255, 0.35)";
+  zctx.fillRect(zx, zy, zw, zh);
+
+  zctx.lineWidth = 4;
+  zctx.strokeStyle = "#ff9f00";
+  zctx.strokeRect(zx, zy, zw, zh);
+
+  zctx.strokeStyle = "rgba(0,0,0,0.08)";
+  zctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    zctx.beginPath();
+    zctx.moveTo(zx + zw * i / 4, zy);
+    zctx.lineTo(zx + zw * i / 4, zy + zh);
+    zctx.stroke();
+    zctx.beginPath();
+    zctx.moveTo(zx, zy + zh * i / 4);
+    zctx.lineTo(zx + zw, zy + zh * i / 4);
+    zctx.stroke();
+  }
+
+  for (const p of particles) {
+    if (p.x >= o.x && p.x <= o.x + o.w && p.y >= o.y && p.y <= o.y + o.h) {
+      const px = zx + (p.x - o.x) * scaleX;
+      const py = zy + (p.y - o.y) * scaleY;
+      zctx.beginPath();
+      zctx.fillStyle = "#d52b2b";
+      zctx.arc(px, py, p.r * 2.8, 0, Math.PI * 2);
+      zctx.fill();
+
+      zctx.strokeStyle = "rgba(120,0,0,0.45)";
+      zctx.lineWidth = 2;
+      zctx.beginPath();
+      zctx.moveTo(px, py);
+      zctx.lineTo(px + p.vx * 16, py + p.vy * 16);
+      zctx.stroke();
+    }
+  }
+
+  zctx.fillStyle = "#555";
+  zctx.font = "14px Malgun Gothic, Arial";
+  zctx.fillText("같은 크기의 작은 공간을 크게 본 모습", 92, 395);
+}
+
+function updateLabels() {
+  const observed = countObserved();
+
+  // 약 10초 평균: 60fps 기준 600개까지 저장
+  observedSamples.push(observed);
+  if (observedSamples.length > 600) observedSamples.shift();
+
+  totalParticlesEl.textContent = particleCount;
+  volumeTextEl.textContent = currentVolume();
+  relativeConcEl.textContent = relativeConcentration().toFixed(2) + "배";
+  observedCountEl.textContent = observed;
+  avgObservedCountEl.textContent = averageObserved().toFixed(1);
+}
+
+function loop() {
+  updateParticles();
+  drawBeaker();
+  drawZoom();
+  updateLabels();
+  requestAnimationFrame(loop);
+}
+
+addWaterBtn.addEventListener("click", addWater);
+resetBtn.addEventListener("click", reset);
+
+reset();
+loop();
+</script>
+</body>
+</html>
