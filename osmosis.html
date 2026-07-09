@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>삼투 현상 시뮬레이션</title>
+    <style>
+        body {
+            font-family: 'Malgun Gothic', sans-serif;
+            background-color: #f8f9fa;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 { color: #2c3e50; margin-bottom: 5px; }
+        p { color: #7f8c8d; margin-top: 0; margin-bottom: 20px; }
+        
+        /* 컨트롤러 디자인 */
+        .controls-container {
+            background: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            gap: 30px;
+            align-items: center;
+        }
+        .slider-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+        }
+        label { font-weight: bold; color: #34495e; }
+        .slider-label { font-size: 14px; color: #e74c3c; font-weight: bold; }
+        
+        /* 안내 문구 창 */
+        #info-box {
+            font-weight: bold;
+            color: #2c3e50;
+            background: #e8f4f8;
+            padding: 10px 20px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            min-width: 500px;
+            text-align: center;
+            border-left: 5px solid #3498db;
+        }
+
+        canvas {
+            background: #ffffff;
+            border-radius: 10px;
+            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+        }
+    </style>
+</head>
+<body>
+
+    <h1>삼투 현상 실시간 시뮬레이션</h1>
+    <p>고등학교 통합과학 - 반투과성 막을 통한 물 분자의 확산</p>
+
+    <div class="controls-container">
+        <div class="slider-group">
+            <label for="leftSolute">[왼쪽] 용질 (설탕/소금)</label>
+            <input type="range" id="leftSolute" min="0" max="25" value="5" oninput="updateConcentration()">
+            <span id="leftLabel" class="slider-label">농도: 낮음 (5개)</span>
+        </div>
+        
+        <div class="slider-group">
+            <label for="rightSolute">[오른쪽] 용질 (설탕/소금)</label>
+            <input type="range" id="rightSolute" min="0" max="25" value="15" oninput="updateConcentration()">
+            <span id="rightLabel" class="slider-label">농도: 높음 (15개)</span>
+        </div>
+    </div>
+
+    <div id="info-box">계산 중...</div>
+
+    <canvas id="osmosisCanvas" width="800" height="500"></canvas>
+
+    <script>
+        const canvas = document.getElementById('osmosisCanvas');
+        const ctx = canvas.getContext('2d');
+        const infoBox = document.getElementById('info-box');
+
+        // 상태 변수
+        let leftWaterLevel = 350;  
+        let rightWaterLevel = 350;
+        const baseLevel = 350;     
+
+        let waterParticles = [];
+        let soluteParticles = [];
+
+        // 경계선 정의
+        const membraneX = canvas.width / 2;
+        const leftWall = 50;
+        const rightWall = canvas.width - 50;
+        const bottomWall = 480;
+
+        // 입자 생성 및 초기화 함수
+        function initParticles() {
+            waterParticles = [];
+            soluteParticles = [];
+
+            const leftCount = parseInt(document.getElementById('leftSolute').value);
+            const rightCount = parseInt(document.getElementById('rightSolute').value);
+
+            // 1. 물 분자 수 대폭 축소 (기존 110개 -> 좌우 각각 50개씩으로 제한하여 쾌적화)
+            for (let i = 0; i < 50; i++) {
+                // 왼쪽 물 분자
+                waterParticles.push({
+                    x: Math.random() * (membraneX - leftWall - 30) + leftWall + 15,
+                    y: Math.random() * (bottomWall - leftWaterLevel - 30) + leftWaterLevel + 15,
+                    vx: (Math.random() - 0.5) * 2,
+                    vy: (Math.random() - 0.5) * 2,
+                    side: 'left'
+                });
+                // 오른쪽 물 분자
+                waterParticles.push({
+                    x: Math.random() * (rightWall - membraneX - 30) + membraneX + 15,
+                    y: Math.random() * (bottomWall - rightWaterLevel - 30) + rightWaterLevel + 15,
+                    vx: (Math.random() - 0.5) * 2,
+                    vy: (Math.random() - 0.5) * 2,
+                    side: 'right'
+                });
+            }
+
+            // 2. 왼쪽 용질 분자 생성
+            for (let i = 0; i < leftCount; i++) {
+                soluteParticles.push({
+                    x: Math.random() * (membraneX - leftWall - 40) + leftWall + 20,
+                    y: Math.random() * (bottomWall - leftWaterLevel - 40) + leftWaterLevel + 20,
+                    vx: (Math.random() - 0.5) * 0.8,
+                    vy: (Math.random() - 0.5) * 0.8,
+                    side: 'left'
+                });
+            }
+
+            // 3. 오른쪽 용질 분자 생성
+            for (let i = 0; i < rightCount; i++) {
+                soluteParticles.push({
+                    x: Math.random() * (rightWall - membraneX - 40) + membraneX + 20,
+                    y: Math.random() * (bottomWall - rightWaterLevel - 40) + rightWaterLevel + 20,
+                    vx: (Math.random() - 0.5) * 0.8,
+                    vy: (Math.random() - 0.5) * 0.8,
+                    side: 'right'
+                });
+            }
+        }
+
+        // 농도 슬라이더 변경 시 호출
+        function updateConcentration() {
+            const leftCount = parseInt(document.getElementById('leftSolute').value);
+            const rightCount = parseInt(document.getElementById('rightSolute').value);
+
+            document.getElementById('leftLabel').innerText = `농도: ${leftCount === 0 ? '순수한 물' : leftCount > 15 ? '높음' : '낮음'} (${leftCount}개)`;
+            document.getElementById('rightLabel').innerText = `농도: ${rightCount === 0 ? '순수한 물' : rightCount > 15 ? '높음' : '낮음'} (${rightCount}개)`;
+
+            const diff = rightCount - leftCount;
+            leftWaterLevel = baseLevel + (diff * 3);
+            rightWaterLevel = baseLevel - (diff * 3);
+
+            if (diff > 0) {
+                infoBox.innerHTML = `📢 <strong>[현상]</strong> 왼쪽(저농도)에서 오른쪽(고농도)으로 물 분자가 순이동하여 <strong>오른쪽 수면이 높아집니다.</strong>`;
+            } else if (diff < 0) {
+                infoBox.innerHTML = `📢 <strong>[현상]</strong> 오른쪽(저농도)에서 왼쪽(고농도)으로 물 분자가 순이동하여 <strong>왼쪽 수면이 높아집니다.</strong>`;
+            } else {
+                infoBox.innerHTML = `📢 <strong>[동적 평형]</strong> 양쪽 농도가 같습니다. 양방향으로 이동하는 물 분자의 양이 같아 수면 높이가 유지됩니다.`;
+            }
+
+            initParticles();
+        }
+
+        // 프레임 업데이트 및 그리기 루프
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 1. 비커 배경 용액 채우기
+            ctx.fillStyle = "rgba(173, 216, 230, 0.4)";
+            ctx.fillRect(leftWall, leftWaterLevel, membraneX - leftWall, bottomWall - leftWaterLevel);
+            ctx.fillRect(membraneX, rightWaterLevel, rightWall - membraneX, bottomWall - rightWaterLevel);
+
+            // 2. 비커 외곽선 그리기
+            ctx.strokeStyle = "#34495e";
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(leftWall, 100);
+            ctx.lineTo(leftWall, bottomWall);
+            ctx.lineTo(rightWall, bottomWall);
+            ctx.lineTo(rightWall, 100);
+            ctx.stroke();
+
+            // 3. 중앙 반투과성 막 그리기
+            ctx.strokeStyle = "#7f8c8d";
+            ctx.lineWidth = 4;
+            ctx.setLineDash([8, 12]); 
+            ctx.beginPath();
+            ctx.moveTo(membraneX, 120);
+            ctx.lineTo(membraneX, bottomWall);
+            ctx.stroke();
+            ctx.setLineDash([]); 
+
+            ctx.fillStyle = "#7f8c8d";
+            ctx.font = "bold 13px sans-serif";
+            ctx.fillText("반투과성 막", membraneX - 35, 110);
+
+            // 4. 용질 분자 업데이트 (큰 보라색 원)
+            const sRadius = 12;
+            soluteParticles.forEach(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+
+                // 외곽 및 바닥 탈출 방지 감금 로직 강화
+                if (p.y > bottomWall - sRadius) { p.y = bottomWall - sRadius; p.vy *= -1; }
+
+                if (p.side === 'left') {
+                    if (p.x < leftWall + sRadius) { p.x = leftWall + sRadius; p.vx *= -1; }
+                    if (p.x > membraneX - sRadius) { p.x = membraneX - sRadius; p.vx *= -1; }
+                    if (p.y < leftWaterLevel + sRadius) { p.y = leftWaterLevel + sRadius; p.vy *= -1; }
+                } else {
+                    if (p.x < membraneX + sRadius) { p.x = membraneX + sRadius; p.vx *= -1; }
+                    if (p.x > rightWall - sRadius) { p.x = rightWall - sRadius; p.vx *= -1; }
+                    if (p.y < rightWaterLevel + sRadius) { p.y = rightWaterLevel + sRadius; p.vy *= -1; }
+                }
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, sRadius, 0, Math.PI * 2);
+                ctx.fillStyle = "#9b59b6"; 
+                ctx.fill();
+                ctx.strokeStyle = "#4a235a";
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            });
+
+            // 5. 물 분자 업데이트 (작은 파란색 원)
+            const leftCount = parseInt(document.getElementById('leftSolute').value);
+            const rightCount = parseInt(document.getElementById('rightSolute').value);
+            const wRadius = 4;
+
+            waterParticles.forEach(p => {
+                // 삼투 흐름 가속 바이어스
+                if (rightCount > leftCount && p.x > membraneX - 60 && p.x < membraneX + 60) {
+                    p.vx += 0.04; 
+                } else if (leftCount > rightCount && p.x > membraneX - 60 && p.x < membraneX + 60) {
+                    p.vx -= 0.04; 
+                }
+
+                p.x += p.vx;
+                p.y += p.vy;
+
+                // 좌우 외곽 벽 및 바닥 감금벽 보정
+                if (p.x < leftWall + wRadius) { p.x = leftWall + wRadius; p.vx *= -1; }
+                if (p.x > rightWall - wRadius) { p.x = rightWall - wRadius; p.vx *= -1; }
+                if (p.y > bottomWall - wRadius) { p.y = bottomWall - wRadius; p.vy *= -1; }
+
+                // 유동 수면에 대한 튕김 및 위치 이탈 보정 수식 강화
+                if (p.x < membraneX) {
+                    if (p.y < leftWaterLevel + wRadius) { p.y = leftWaterLevel + wRadius; p.vy *= -1; }
+                } else {
+                    if (p.y < rightWaterLevel + wRadius) { p.y = rightWaterLevel + wRadius; p.vy *= -1; }
+                }
+
+                // 중앙 반투과성 막 통과 처리 및 공중 통과 차단
+                if (p.x > membraneX - 3 && p.x < membraneX + 3) {
+                    if (p.y < leftWaterLevel && p.vx < 0) { p.vx *= -1; p.x = membraneX + 4; }
+                    if (p.y < rightWaterLevel && p.vx > 0) { p.vx *= -1; p.x = membraneX - 4; }
+                }
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, wRadius, 0, Math.PI * 2);
+                ctx.fillStyle = "#3498db"; 
+                ctx.fill();
+            });
+
+            requestAnimationFrame(animate);
+        }
+
+        // 최초 실행
+        updateConcentration();
+        animate();
+    </script>
+</body>
+</html>
