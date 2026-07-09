@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>세포막을 통한 물질 이동 시뮬레이션</title>
+    <style>
+        body {
+            font-family: 'Malgun Gothic', sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 { color: #2c3e50; margin-bottom: 5px; }
+        p { color: #7f8c8d; margin-top: 0; margin-bottom: 20px; }
+        
+        /* 컨트롤러 스타일 */
+        .controls {
+            background: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        button {
+            padding: 10px 15px;
+            font-size: 14px;
+            font-weight: bold;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-simple { background-color: #3498db; color: white; }
+        .btn-facilitated { background-color: #e67e22; color: white; }
+        .btn-reset { background-color: #95a5a6; color: white; }
+        button:hover { opacity: 0.8; transform: translateY(-2px); }
+        
+        /* 설명창 */
+        #info-box {
+            font-weight: bold;
+            color: #2c3e50;
+            min-height: 24px;
+        }
+
+        /* 캔버스 스타일 */
+        canvas {
+            background: #ffffff;
+            border-radius: 10px;
+            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+        }
+    </style>
+</head>
+<body>
+
+    <h1>세포막을 통한 물질 이동 시뮬레이션</h1>
+    <p>고등학교 통합과학 - 물질의 확산 방식 비교</p>
+
+    <div class="controls">
+        <strong>[단순 확산]</strong>
+        <button class="btn-simple" onclick="selectSubstance('O2')">산소 (O₂)</button>
+        <button class="btn-simple" onclick="selectSubstance('CO2')">이산화탄소 (CO₂)</button>
+        <button class="btn-simple" onclick="selectSubstance('FattyAcid')">지방산 (지용성)</button>
+        | 
+        <strong>[촉진 확산]</strong>
+        <button class="btn-facilitated" onclick="selectSubstance('Glucose')">포도당</button>
+        <button class="btn-facilitated" onclick="selectSubstance('Ion')">이온 (Na⁺/K⁺)</button>
+        | 
+        <button class="btn-reset" onclick="resetSimulation()">모두 지우기</button>
+    </div>
+
+    <div class="controls" id="info-box">물질 버튼을 클릭하면 세포막을 통한 이동이 시작됩니다.</div>
+
+    <canvas id="simCanvas" width="800" height="500"></canvas>
+
+    <script>
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+        const infoBox = document.getElementById('info-box');
+
+        let particles = [];
+        let currentType = null;
+
+        // 막단백질이 위치한 X축 범위 정의 (충돌 및 우회 판단용)
+        const proteins = [
+            { start: 195, end: 305, center: 250 },
+            { start: 495, end: 605, center: 550 }
+        ];
+
+        // 물질별 속성 정의 (지방산 추가)
+        const substanceInfo = {
+            'O2': { name: '산소 (O₂)', color: '#2ecc71', size: 6, path: 'simple', text: '산소는 크기가 매우 작아 인지질 2중층을 직접 통과합니다. (단순 확산)' },
+            'CO2': { name: '이산화탄소 (CO₂)', color: '#1abc9c', size: 6, path: 'simple', text: '이산화탄소는 크기가 작은 기체 분자로 인지질 2중층을 직접 통과합니다. (단순 확산)' },
+            'FattyAcid': { name: '지방산', color: '#f1c40f', size: 7, path: 'simple', text: '지방산은 지용성(성질이 유전적으로 지질과 친함) 물질이므로 인지질 2중층을 직접 통과합니다. (단순 확산)' },
+            'Glucose': { name: '포도당', color: '#9b59b6', size: 10, path: 'facilitated', text: '포도당은 크기가 커서 인지질을 통과하지 못하고, 막단백질을 통해 이동합니다. (촉진 확산)' },
+            'Ion': { name: '이온 (Na⁺/K⁺)', color: '#e74c3c', size: 5, path: 'facilitated', text: '이온은 전하를 띠고 있어 인지질을 통과하지 못하며, 막단백질을 통해 이동합니다. (촉진 확산)' }
+        };
+
+        // 입자 클래스 정의
+        class Particle {
+            constructor(type) {
+                this.type = type;
+                this.info = substanceInfo[type];
+                this.size = this.info.size;
+                this.color = this.info.color;
+                
+                // 세포 외부(위쪽)에서 무작위 생성
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * 120 + 20; 
+                
+                this.speedY = Math.random() * 1 + 1; // 하강 속도
+                this.speedX = (Math.random() - 0.5) * 1; // 좌우 흔들림
+
+                // 촉진 확산 물질 타겟 설정
+                if (this.info.path === 'facilitated') {
+                    this.targetX = Math.random() > 0.5 ? 250 : 550;
+                }
+            }
+
+            update() {
+                if (this.info.path === 'simple') {
+                    // [개선] 단순 확산 물질: 막단백질 영역(Y: 180~320)을 통과할 때 단백질을 비껴가도록 유도
+                    let nextY = this.y + this.speedY;
+                    let nextX = this.x + this.speedX;
+
+                    if (nextY >= 175 && nextY <= 325) {
+                        proteins.forEach(p => {
+                            // 만약 다음 움직임이 단백질 범위 안으로 들어가려고 한다면 바깥쪽으로 밀어냄
+                            if (nextX >= p.start - this.size && nextX <= p.end + this.size) {
+                                if (this.x < p.center) {
+                                    nextX = p.start - this.size - 2; // 왼쪽으로 우회
+                                } else {
+                                    nextX = p.end + this.size + 2; // 오른쪽으로 우회
+                                }
+                            }
+                        });
+                    }
+                    this.x = nextX;
+                    this.y = nextY;
+
+                } else {
+                    // 촉진 확산: 막단백질 입구(y=180) 전까지 유도 후 통과
+                    if (this.y < 180) {
+                        this.x += (this.targetX - this.x) * 0.02; 
+                        this.y += this.speedY;
+                    } else if (this.y >= 180 && this.y <= 320) {
+                        // 단백질 내부 통로(가운데 빈 공간인 X: 통로 중심값 주위)로 이동
+                        this.x = this.targetX + (Math.random() - 0.5) * 4; 
+                        this.y += this.speedY * 1.2; 
+                    } else {
+                        this.y += this.speedY;
+                        this.x += this.speedX;
+                    }
+                }
+
+                // 화면 아래로 완전히 나가면 위에서 다시 재생성(무한 순환)
+                if (this.y > canvas.height) {
+                    this.y = Math.random() * 50;
+                    this.x = Math.random() * canvas.width;
+                    if (this.info.path === 'facilitated') {
+                        this.targetX = Math.random() > 0.5 ? 250 : 550;
+                    }
+                }
+                
+                // 좌우 벽 바운스
+                if (this.x < 0 || this.x > canvas.width) this.speedX *= -1;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.closePath();
+            }
+        }
+
+        // 배경 구조물 (세포막, 인지질, 막단백질) 그리기
+        function drawCellMembrane() {
+            const membraneY1 = 200;
+            const membraneY2 = 300;
+
+            // 1. 인지질 이중층 배경 바탕
+            ctx.fillStyle = "#ebf5fb";
+            ctx.fillRect(0, membraneY1, canvas.width, membraneY2 - membraneY1);
+
+            // 2. 인지질 머리와 꼬리 그리기 (단백질 영역 제외)
+            for (let x = 15; x < canvas.width; x += 25) {
+                if ((x > 180 && x < 320) || (x > 480 && x < 620)) continue;
+
+                // 친수성 머리 (위쪽 층)
+                ctx.beginPath();
+                ctx.arc(x, membraneY1, 10, 0, Math.PI * 2);
+                ctx.fillStyle = "#34495e";
+                ctx.fill();
+                
+                // 소수성 꼬리
+                ctx.strokeStyle = "#7f8c8d";
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(x - 3, membraneY1 + 10); ctx.lineTo(x - 3, membraneY1 + 45);
+                ctx.moveTo(x + 3, membraneY1 + 10); ctx.lineTo(x + 3, membraneY1 + 45);
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.moveTo(x - 3, membraneY2 - 10); ctx.lineTo(x - 3, membraneY2 - 45);
+                ctx.moveTo(x + 3, membraneY2 - 10); ctx.lineTo(x + 3, membraneY2 - 45);
+                ctx.stroke();
+
+                // 친수성 머리 (아래쪽 층)
+                ctx.beginPath();
+                ctx.arc(x, membraneY2, 10, 0, Math.PI * 2);
+                ctx.fillStyle = "#34495e";
+                ctx.fill();
+            }
+
+            // 3. 막단백질 2개 그리기 (채널 모양)
+            const proteinXCoords = [200, 500];
+            proteinXCoords.forEach(pX => {
+                ctx.fillStyle = "#e67e22";
+                // 왼쪽 기둥 (두께 40)
+                ctx.fillRect(pX, membraneY1 - 20, 40, 140);
+                // 오른쪽 기둥 (두께 40, 가운데 20만큼 통로 개방)
+                ctx.fillRect(pX + 60, membraneY1 - 20, 40, 140);
+                
+                // 단백질 라벨링
+                ctx.fillStyle = "#ffffff";
+                ctx.font = "bold 12px sans-serif";
+                ctx.fillText("막단백질", pX + 24, membraneY1 + 55);
+            });
+
+            // 영역 텍스트 안내
+            ctx.fillStyle = "rgba(44, 62, 80, 0.6)";
+            ctx.font = "bold 14px sans-serif";
+            ctx.fillText("세포 외부 (고농도)", 20, 40);
+            ctx.fillText("세포 내부 (저농도)", 20, 460);
+            ctx.fillText("인지질 2중층", 20, 255);
+        }
+
+        // 물질 선택 함수
+        function selectSubstance(type) {
+            currentType = type;
+            particles = []; 
+            infoBox.innerText = substanceInfo[type].text;
+            
+            for (let i = 0; i < 40; i++) {
+                particles.push(new Particle(type));
+            }
+        }
+
+        // 리셋 함수
+        function resetSimulation() {
+            particles = [];
+            currentType = null;
+            infoBox.innerText = "물질 버튼을 클릭하면 세포막을 통한 이동이 시작됩니다.";
+        }
+
+        // 메인 애니메이션 루프
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 배경 및 세포막 그리기
+            drawCellMembrane();
+
+            // 입자 업데이트 및 그리기
+            particles.forEach(p => {
+                p.update();
+                p.draw();
+            });
+
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
